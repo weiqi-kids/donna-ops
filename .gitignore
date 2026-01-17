@@ -1,0 +1,6 @@
+.DS_Store
+*.log
+state/*.json
+state/*.pid
+state/.lock
+config/config.yaml

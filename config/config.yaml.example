@@ -1,0 +1,77 @@
+# Donna-Ops 設定檔
+# 複製此檔案為 config.yaml 並填入您的設定
+
+# 主機識別
+host_name: "my-server"
+
+# Linode API 設定
+# 取得 API Token: https://cloud.linode.com/profile/tokens
+linode_api_token: ""
+linode_instance_id: ""
+
+# GitHub 設定
+# 格式: owner/repo
+# 設定為 "auto" 或留空會自動從 git remote 偵測
+github_repo: "auto"
+
+# 閾值設定
+thresholds:
+  cpu_percent: 80       # CPU 使用率警告閾值
+  memory_percent: 85    # 記憶體使用率警告閾值
+  disk_percent: 90      # 磁碟使用率警告閾值
+  load_per_cpu: 2.0     # 每 CPU 負載警告閾值
+
+# 檢查間隔
+# 設定為 -1 可停用該功能
+intervals:
+  periodic_check_minutes: 5    # 定期檢查間隔（分鐘），-1 停用
+  alert_poll_seconds: 60       # Linode 警報輪詢間隔（秒），-1 停用
+
+# 通知設定（全部選填，可全部留空）
+notifications:
+  # Slack Webhook URL（選填）
+  # 建立方式: https://api.slack.com/messaging/webhooks
+  slack_webhook: ""
+
+  # Telegram Bot 設定（選填）
+  # 建立 Bot: https://t.me/botfather
+  telegram_bot_token: ""
+  telegram_chat_id: ""
+
+# 自動修復設定
+remediation:
+  # 是否啟用自動修復
+  enabled: true
+
+  # 低風險動作自動執行
+  auto_low_risk: true
+
+  # 修復動作冷卻時間（秒）
+  cooldown_seconds: 300
+
+  # 需要人工確認的嚴重度等級
+  human_confirm_severity:
+    - high
+    - critical
+
+# Issue 管理
+issues:
+  # 連續正常次數以自動關閉 Issue
+  normal_threshold: 3
+
+  # Issue 標題前綴
+  title_prefix: "[Donna-Ops]"
+
+# 日誌設定
+log_level: INFO   # DEBUG, INFO, WARN, ERROR
+
+# Claude AI 設定
+claude:
+  # Claude CLI 路徑（留空使用預設）
+  cli_path: ""
+
+  # AI 分析超時（秒）
+  timeout: 120
+
+  # 是否預設使用 AI 分析
+  default_ai: false

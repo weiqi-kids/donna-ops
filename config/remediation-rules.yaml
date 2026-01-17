@@ -1,0 +1,195 @@
+# Donna-Ops 自動修復規則定義
+# 定義哪些問題可以觸發哪些修復動作
+
+# 修復動作定義
+actions:
+  clear-cache:
+    description: "清除系統快取以釋放記憶體"
+    risk_level: low
+    auto_executable: true
+    cooldown: 300
+    triggers:
+      - metric: memory
+        condition: "> threshold"
+      - metric: swap_usage
+        condition: "> 80%"
+
+  rotate-logs:
+    description: "輪替日誌檔案以釋放磁碟空間"
+    risk_level: low
+    auto_executable: true
+    cooldown: 300
+    triggers:
+      - metric: disk
+        condition: "> threshold"
+
+  docker-prune:
+    description: "清理未使用的 Docker 資源"
+    risk_level: low
+    auto_executable: true
+    cooldown: 600
+    triggers:
+      - metric: disk
+        condition: "> threshold"
+      - source: docker
+        condition: "disk_usage > 10GB"
+
+  restart-service:
+    description: "重啟服務（Docker 容器或 systemd 服務）"
+    risk_level: medium
+    auto_executable: false
+    cooldown: 600
+    requires:
+      - ai_recommendation
+    triggers:
+      - source: docker
+        condition: "health_check_failed"
+      - source: docker
+        condition: "not_running"
+      - source: systemd
+        condition: "failed"
+
+  kill-runaway:
+    description: "終止佔用過多資源的失控程序"
+    risk_level: medium
+    auto_executable: false
+    cooldown: 300
+    requires:
+      - ai_recommendation
+    triggers:
+      - metric: cpu
+        condition: "> threshold + 10%"
+      - metric: load_per_cpu
+        condition: "> 3.0"
+
+  restart-docker:
+    description: "重啟 Docker daemon"
+    risk_level: high
+    auto_executable: false
+    cooldown: 1800
+    requires:
+      - ai_recommendation
+      - human_confirmation
+    triggers:
+      - source: docker
+        condition: "daemon_unresponsive"
+
+  reboot:
+    description: "系統重啟"
+    risk_level: critical
+    auto_executable: false
+    cooldown: 3600
+    requires:
+      - ai_recommendation
+      - human_confirmation
+    triggers:
+      - condition: "kernel_panic"
+      - condition: "system_unresponsive"
+
+# 問題到動作的映射規則
+rules:
+  # CPU 相關
+  cpu_high:
+    severity: warning
+    description: "CPU 使用率過高"
+    suggested_actions:
+      - action: kill-runaway
+        condition: "cpu > 95%"
+        priority: 1
+
+  # 記憶體相關
+  memory_high:
+    severity: warning
+    description: "記憶體使用率過高"
+    suggested_actions:
+      - action: clear-cache
+        priority: 1
+      - action: kill-runaway
+        condition: "memory > 95%"
+        priority: 2
+
+  # 磁碟相關
+  disk_high:
+    severity: warning
+    description: "磁碟使用率過高"
+    suggested_actions:
+      - action: docker-prune
+        priority: 1
+      - action: rotate-logs
+        priority: 2
+
+  # 負載相關
+  load_high:
+    severity: warning
+    description: "系統負載過高"
+    suggested_actions:
+      - action: kill-runaway
+        priority: 1
+
+  # Docker 相關
+  docker_unhealthy:
+    severity: warning
+    description: "Docker 容器不健康"
+    suggested_actions:
+      - action: restart-service
+        priority: 1
+
+  docker_not_running:
+    severity: high
+    description: "Docker 容器未執行"
+    suggested_actions:
+      - action: restart-service
+        priority: 1
+
+  # Linode 警報相關
+  linode_cpu:
+    severity: warning
+    description: "Linode CPU 警報"
+    suggested_actions:
+      - action: kill-runaway
+        priority: 1
+
+  linode_io:
+    severity: warning
+    description: "Linode I/O 警報"
+    suggested_actions:
+      - action: docker-prune
+        priority: 1
+      - action: rotate-logs
+        priority: 2
+
+# 嚴重度等級定義
+severity_levels:
+  low:
+    auto_remediate: true
+    notify: false
+    create_issue: false
+
+  minor:
+    auto_remediate: true
+    notify: false
+    create_issue: true
+
+  warning:
+    auto_remediate: true
+    notify: true
+    create_issue: true
+
+  high:
+    auto_remediate: false
+    notify: true
+    create_issue: true
+    requires_ai: true
+
+  critical:
+    auto_remediate: false
+    notify: true
+    create_issue: true
+    requires_ai: true
+    requires_human: true
+
+# 冷卻時間（秒）
+default_cooldowns:
+  low_risk: 300
+  medium_risk: 600
+  high_risk: 1800
