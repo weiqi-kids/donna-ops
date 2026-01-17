@@ -21,8 +21,15 @@ set -euo pipefail
 # 版本
 VERSION="1.0.0"
 
-# 取得腳本目錄
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 取得腳本目錄（支援符號連結）
+_source="${BASH_SOURCE[0]}"
+while [[ -L "$_source" ]]; do
+  _dir="$(cd -P "$(dirname "$_source")" && pwd)"
+  _source="$(readlink "$_source")"
+  [[ "$_source" != /* ]] && _source="$_dir/$_source"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$_source")" && pwd)"
+unset _source _dir
 export SCRIPT_DIR
 
 # 顯示幫助
