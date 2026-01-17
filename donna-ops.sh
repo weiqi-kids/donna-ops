@@ -475,11 +475,22 @@ cmd_status() {
   local json_output="${ARG_json:-}"
   local issues_only="${ARG_issues:-}"
 
+  # 讀取設定
+  local periodic_interval poller_interval
+  periodic_interval=$(config_get_int 'intervals.periodic_check_minutes' 5)
+  poller_interval=$(config_get_int 'intervals.alert_poll_seconds' 60)
+
+  local periodic_disabled="false"
+  local poller_disabled="false"
+  [[ $periodic_interval -lt 0 ]] && periodic_disabled="true"
+  [[ $poller_interval -lt 0 ]] && poller_disabled="true"
+
   # 讀取狀態
   local daemon_running="false"
   local periodic_running="false"
   local poller_running="false"
 
+  # 方法 1: 檢查 PID 檔案
   if [[ -f "${SCRIPT_DIR}/state/periodic.pid" ]]; then
     local pid
     pid=$(cat "${SCRIPT_DIR}/state/periodic.pid")
@@ -495,6 +506,33 @@ cmd_status() {
     if kill -0 "$pid" 2>/dev/null; then
       poller_running="true"
       daemon_running="true"
+    fi
+  fi
+
+  # 方法 2: 檢查 systemd 服務狀態（前景模式）
+  if [[ "$daemon_running" == "false" ]] && command -v systemctl >/dev/null 2>&1; then
+    if systemctl is-active --quiet donna-ops 2>/dev/null; then
+      daemon_running="true"
+      # 檢查實際進程
+      if pgrep -f "cron-periodic.sh" >/dev/null 2>&1; then
+        periodic_running="true"
+      fi
+      if pgrep -f "alert-poller.sh" >/dev/null 2>&1; then
+        poller_running="true"
+      fi
+    fi
+  fi
+
+  # 方法 3: 直接檢查進程（fallback）
+  if [[ "$daemon_running" == "false" ]]; then
+    if pgrep -f "donna-ops.sh daemon" >/dev/null 2>&1; then
+      daemon_running="true"
+      if pgrep -f "cron-periodic.sh" >/dev/null 2>&1; then
+        periodic_running="true"
+      fi
+      if pgrep -f "alert-poller.sh" >/dev/null 2>&1; then
+        poller_running="true"
+      fi
     fi
   fi
 
@@ -515,8 +553,14 @@ cmd_status() {
     cat <<EOF
 {
   "daemon_running": $daemon_running,
-  "periodic_running": $periodic_running,
-  "poller_running": $poller_running,
+  "periodic": {
+    "running": $periodic_running,
+    "disabled": $periodic_disabled
+  },
+  "poller": {
+    "running": $poller_running,
+    "disabled": $poller_disabled
+  },
   "active_issues": $issue_count,
   "issues": $issues
 }
@@ -535,8 +579,20 @@ EOF
       echo "╚════════════════════════════════════════╝"
       echo ""
       echo "【服務狀態】"
-      echo "  定期檢查: $(if [[ "$periodic_running" == "true" ]]; then echo "運行中 ✓"; else echo "已停止 ✗"; fi)"
-      echo "  警報輪詢: $(if [[ "$poller_running" == "true" ]]; then echo "運行中 ✓"; else echo "已停止 ✗"; fi)"
+      if [[ "$periodic_disabled" == "true" ]]; then
+        echo "  定期檢查: 已停用 ○"
+      elif [[ "$periodic_running" == "true" ]]; then
+        echo "  定期檢查: 運行中 ✓"
+      else
+        echo "  定期檢查: 已停止 ✗"
+      fi
+      if [[ "$poller_disabled" == "true" ]]; then
+        echo "  警報輪詢: 已停用 ○"
+      elif [[ "$poller_running" == "true" ]]; then
+        echo "  警報輪詢: 運行中 ✓"
+      else
+        echo "  警報輪詢: 已停止 ✗"
+      fi
       echo ""
       echo "【目前問題】"
       if (( issue_count > 0 )); then
