@@ -56,6 +56,15 @@ status_report_init() {
   return 0
 }
 
+# 內部函式：呼叫 gh CLI（支援重試）
+_gh_status_retry() {
+  if declare -f retry_api_call >/dev/null 2>&1; then
+    retry_api_call gh "$@"
+  else
+    gh "$@"
+  fi
+}
+
 # 取得或建立狀態 Issue
 # 用法: get_or_create_status_issue
 # 輸出: Issue 編號
@@ -67,7 +76,7 @@ get_or_create_status_issue() {
 
   # 搜尋現有的狀態 Issue
   local existing
-  existing=$(gh issue list \
+  existing=$(_gh_status_retry issue list \
     --repo "$GITHUB_REPO" \
     --state open \
     --label "$STATUS_ISSUE_LABEL" \
@@ -109,7 +118,7 @@ EOF
 
   # 建立 Issue
   local result
-  result=$(gh issue create \
+  result=$(_gh_status_retry issue create \
     --repo "$GITHUB_REPO" \
     --title "$STATUS_ISSUE_TITLE" \
     --body "$body" \
@@ -296,7 +305,7 @@ EOF
 
   # 發送留言
   local result
-  result=$(gh issue comment "$STATUS_ISSUE_NUMBER" \
+  result=$(_gh_status_retry issue comment "$STATUS_ISSUE_NUMBER" \
     --repo "$GITHUB_REPO" \
     --body "$report" \
     2>&1)

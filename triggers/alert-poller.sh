@@ -23,6 +23,7 @@ source "${SCRIPT_DIR}/lib/logging.sh"
 source "${SCRIPT_DIR}/lib/state.sh"
 source "${SCRIPT_DIR}/lib/notify.sh"
 source "${SCRIPT_DIR}/lib/pipeline.sh"
+source "${SCRIPT_DIR}/lib/retry.sh"
 
 # 載入收集器
 source "${SCRIPT_DIR}/collectors/system.sh"

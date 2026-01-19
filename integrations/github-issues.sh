@@ -56,6 +56,15 @@ github_init() {
   return 0
 }
 
+# 內部函式：呼叫 gh CLI（支援重試）
+_gh_with_retry() {
+  if declare -f retry_api_call >/dev/null 2>&1; then
+    retry_api_call gh "$@"
+  else
+    gh "$@"
+  fi
+}
+
 # 建立 Issue
 # 用法：create_issue "title" "body" "severity" "type" [labels...]
 create_issue() {
@@ -95,7 +104,7 @@ EOF
 
   # 建立 Issue
   local result
-  result=$(gh issue create \
+  result=$(_gh_with_retry issue create \
     --repo "$GITHUB_REPO" \
     --title "$title" \
     --body "$body" \
@@ -154,7 +163,7 @@ EOF
   fi
 
   local result
-  result=$(gh issue comment "$issue_number" \
+  result=$(_gh_with_retry issue comment "$issue_number" \
     --repo "$GITHUB_REPO" \
     --body "$comment" \
     2>&1)
@@ -199,7 +208,7 @@ EOF
 
   # 如果有註解，先加註解
   if [[ -n "$comment" ]]; then
-    gh issue comment "$issue_number" \
+    _gh_with_retry issue comment "$issue_number" \
       --repo "$GITHUB_REPO" \
       --body "$comment" \
       2>/dev/null || true
@@ -207,7 +216,7 @@ EOF
 
   # 關閉 Issue
   local result
-  result=$(gh issue close "$issue_number" \
+  result=$(_gh_with_retry issue close "$issue_number" \
     --repo "$GITHUB_REPO" \
     --reason "completed" \
     2>&1)
@@ -250,7 +259,7 @@ find_existing_issue() {
 
   # 搜尋
   local results
-  results=$(gh issue list \
+  results=$(_gh_with_retry issue list \
     --repo "$GITHUB_REPO" \
     --state open \
     --label "donna-ops" \
@@ -279,7 +288,7 @@ find_issue_by_id() {
 
   # 搜尋 title 中包含 issue_id 的 Issue
   local results
-  results=$(gh issue list \
+  results=$(_gh_with_retry issue list \
     --repo "$GITHUB_REPO" \
     --state open \
     --label "donna-ops" \
