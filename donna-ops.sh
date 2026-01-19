@@ -62,6 +62,7 @@ diagnose 選項:
 status 選項:
   --json      JSON 格式輸出
   --issues    只顯示目前問題
+  --report    回報目前狀態到 GitHub
 
 範例:
   donna-ops.sh check                  # 單次檢查
@@ -106,6 +107,7 @@ load_remediation() {
 # 載入整合
 load_integrations() {
   source "${SCRIPT_DIR}/integrations/github-issues.sh"
+  source "${SCRIPT_DIR}/integrations/github-status.sh"
   source "${SCRIPT_DIR}/integrations/linode-alerts.sh"
 }
 
@@ -156,6 +158,20 @@ initialize() {
 
   # 初始化修復執行器
   executor_init "${SCRIPT_DIR}/remediation/actions"
+
+  # 初始化狀態回報
+  local status_report_enabled status_report_interval status_report_on_error
+  status_report_enabled=$(config_get_bool 'status_report.enabled' 'false')
+  status_report_interval=$(config_get_int 'status_report.interval_minutes' 30)
+  status_report_on_error=$(config_get_bool 'status_report.report_on_error' 'true')
+
+  if [[ "$status_report_enabled" == "true" && -n "$github_repo" ]]; then
+    status_report_init "$status_report_interval" 2>/dev/null && {
+      pipeline_set_status_report "true"
+      pipeline_set_status_report_on_error "$status_report_on_error"
+      log_debug "狀態回報已啟用，間隔: ${status_report_interval} 分鐘"
+    }
+  fi
 }
 
 # check 命令
@@ -474,6 +490,13 @@ EOF
 cmd_status() {
   local json_output="${ARG_json:-}"
   local issues_only="${ARG_issues:-}"
+  local do_report="${ARG_report:-}"
+
+  # 如果要回報狀態到 GitHub
+  if [[ -n "$do_report" ]]; then
+    _cmd_status_report
+    return $?
+  fi
 
   # 讀取設定
   local periodic_interval poller_interval
@@ -605,6 +628,72 @@ EOF
       echo "【日誌位置】"
       echo "  ${SCRIPT_DIR}/logs/donna-ops.log"
     fi
+  fi
+}
+
+# 回報狀態到 GitHub
+_cmd_status_report() {
+  echo "正在收集系統狀態並回報到 GitHub..."
+  echo ""
+
+  # 檢查 GitHub 設定
+  if [[ -z "$GITHUB_REPO" ]]; then
+    echo "錯誤: GitHub 未設定，請先配置 config.yaml 中的 github_repo"
+    return 1
+  fi
+
+  # 初始化狀態回報
+  if ! status_report_init 30 2>/dev/null; then
+    echo "錯誤: 無法初始化狀態回報"
+    return 1
+  fi
+
+  # 收集系統指標
+  echo "收集系統指標..."
+  local system_metrics
+  system_metrics=$(collect_all_system 2>/dev/null || collect_quick_metrics)
+
+  # 檢查閾值
+  echo "檢查閾值..."
+  local threshold_result
+  threshold_result=$(check_thresholds "$system_metrics" 2>/dev/null || echo '{"has_violations":false,"violations":[]}')
+
+  # 收集 Docker 狀態
+  local docker_status=""
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    echo "收集 Docker 狀態..."
+    docker_status=$(collect_unhealthy_containers 2>/dev/null || echo '{}')
+  fi
+
+  # 產生警報摘要
+  local alert_summary
+  alert_summary=$(generate_alert_summary "$threshold_result" "$docker_status" "" 2>/dev/null || echo '{"issue_count":0,"max_severity":"ok","issues":[]}')
+
+  # 快速分析
+  local analysis
+  analysis=$(quick_analysis "$alert_summary" 2>/dev/null || echo '{}')
+
+  # 回報狀態
+  echo "回報狀態到 GitHub..."
+  local result
+  result=$(force_report_status "$system_metrics" "$alert_summary" "$analysis")
+
+  local success
+  success=$(echo "$result" | jq -r '.success // false' 2>/dev/null)
+
+  echo ""
+  if [[ "$success" == "true" ]]; then
+    local issue_number
+    issue_number=$(echo "$result" | jq -r '.issue_number')
+    echo "✓ 狀態已成功回報到 GitHub Issue #$issue_number"
+    echo ""
+    echo "查看狀態儀表板:"
+    echo "  https://github.com/${GITHUB_REPO}/issues/${issue_number}"
+  else
+    local error
+    error=$(echo "$result" | jq -r '.error // "未知錯誤"' 2>/dev/null)
+    echo "✗ 狀態回報失敗: $error"
+    return 1
   fi
 }
 

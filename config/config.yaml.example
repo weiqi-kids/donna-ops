@@ -62,6 +62,23 @@ issues:
   # Issue 標題前綴
   title_prefix: "[Donna-Ops]"
 
+# 狀態回報設定
+# 將主機狀態回報到 GitHub Issue，方便遠端監控所有主機
+status_report:
+  # 是否啟用狀態回報
+  enabled: true
+
+  # 回報間隔（分鐘）
+  # 建議值：30-60 分鐘，避免過於頻繁
+  interval_minutes: 30
+
+  # 發生錯誤時立即回報（不受間隔限制）
+  report_on_error: true
+
+  # 是否在每次檢查後都回報（會產生大量留言）
+  # 建議保持 false，僅依據 interval_minutes 回報
+  report_every_check: false
+
 # 日誌設定
 log_level: INFO   # DEBUG, INFO, WARN, ERROR
 
