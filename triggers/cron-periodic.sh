@@ -22,6 +22,7 @@ source "${SCRIPT_DIR}/lib/logging.sh"
 source "${SCRIPT_DIR}/lib/state.sh"
 source "${SCRIPT_DIR}/lib/notify.sh"
 source "${SCRIPT_DIR}/lib/pipeline.sh"
+source "${SCRIPT_DIR}/lib/updater.sh"
 
 # 載入收集器
 source "${SCRIPT_DIR}/collectors/system.sh"
@@ -38,6 +39,7 @@ source "${SCRIPT_DIR}/remediation/executor.sh"
 
 # 載入整合
 source "${SCRIPT_DIR}/integrations/github-issues.sh"
+source "${SCRIPT_DIR}/integrations/github-status.sh"
 
 # 全域設定
 CHECK_INTERVAL="${CHECK_INTERVAL:-300}"  # 5 分鐘
@@ -88,6 +90,34 @@ init_periodic_check() {
   pipeline_set_normal_threshold "$(config_get_int 'issues.normal_threshold' 3)"
   if [[ "$(config_get_bool 'claude.default_ai' 'false')" == "true" ]]; then
     pipeline_set_use_ai "true"
+  fi
+
+  # 初始化狀態回報
+  local status_report_enabled status_report_interval status_report_on_error
+  status_report_enabled=$(config_get_bool 'status_report.enabled' 'false')
+  status_report_interval=$(config_get_int 'status_report.interval_minutes' 30)
+  status_report_on_error=$(config_get_bool 'status_report.report_on_error' 'true')
+
+  if [[ "$status_report_enabled" == "true" ]]; then
+    status_report_init "$status_report_interval" 2>/dev/null && {
+      pipeline_set_status_report "true"
+      pipeline_set_status_report_on_error "$status_report_on_error"
+      log_debug "狀態回報已啟用"
+    }
+  fi
+
+  # 初始化自動更新
+  local auto_update_enabled auto_update_branch auto_update_interval auto_update_restart
+  auto_update_enabled=$(config_get_bool 'auto_update.enabled' 'false')
+  auto_update_branch=$(config_get 'auto_update.branch' 'main')
+  auto_update_interval=$(config_get_int 'auto_update.interval_minutes' 60)
+  auto_update_restart=$(config_get_bool 'auto_update.auto_restart' 'true')
+
+  if [[ "$auto_update_enabled" == "true" ]]; then
+    updater_init "$auto_update_branch" "$auto_update_interval" 2>/dev/null && {
+      updater_set_auto_restart "$auto_update_restart"
+      log_debug "自動更新已啟用，分支: ${auto_update_branch}"
+    }
   fi
 
   # 讀取檢查間隔
@@ -174,6 +204,15 @@ run_periodic_check() {
 
   # 清理過期冷卻
   state_cleanup_cooldowns
+
+  # 檢查自動更新
+  if [[ "$UPDATER_ENABLED" == "true" ]]; then
+    if should_check_update; then
+      log_info "檢查是否有新版本..."
+      mark_update_checked
+      auto_update_if_needed || log_warn "自動更新檢查失敗"
+    fi
+  fi
 
   log_info "========== 定期檢查完成 =========="
 

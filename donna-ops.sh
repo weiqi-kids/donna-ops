@@ -44,6 +44,7 @@ Donna-Ops v${VERSION} - 自動化維運框架
   daemon      啟動背景服務（定期檢查 + 警報輪詢）
   diagnose    執行完整診斷
   status      顯示目前狀態
+  update      檢查並更新到最新版本
   version     顯示版本
 
 check 選項:
@@ -64,12 +65,19 @@ status 選項:
   --issues    只顯示目前問題
   --report    回報目前狀態到 GitHub
 
+update 選項:
+  --check     只檢查是否有更新，不執行更新
+  --force     強制更新（忽略本地變更）
+  --no-restart 更新後不重啟服務
+
 範例:
   donna-ops.sh check                  # 單次檢查
   donna-ops.sh check --dry-run        # 模擬檢查
   donna-ops.sh daemon --foreground    # 前景執行 daemon
   donna-ops.sh diagnose --ai          # AI 輔助診斷
   donna-ops.sh status                 # 顯示狀態
+  donna-ops.sh update                 # 更新到最新版本
+  donna-ops.sh update --check         # 只檢查更新
 
 EOF
 }
@@ -82,6 +90,7 @@ load_modules() {
   source "${SCRIPT_DIR}/lib/logging.sh"
   source "${SCRIPT_DIR}/lib/state.sh"
   source "${SCRIPT_DIR}/lib/notify.sh"
+  source "${SCRIPT_DIR}/lib/updater.sh"
 }
 
 # 載入收集器
@@ -170,6 +179,20 @@ initialize() {
       pipeline_set_status_report "true"
       pipeline_set_status_report_on_error "$status_report_on_error"
       log_debug "狀態回報已啟用，間隔: ${status_report_interval} 分鐘"
+    }
+  fi
+
+  # 初始化自動更新
+  local auto_update_enabled auto_update_branch auto_update_interval auto_update_restart
+  auto_update_enabled=$(config_get_bool 'auto_update.enabled' 'false')
+  auto_update_branch=$(config_get 'auto_update.branch' 'main')
+  auto_update_interval=$(config_get_int 'auto_update.interval_minutes' 60)
+  auto_update_restart=$(config_get_bool 'auto_update.auto_restart' 'true')
+
+  if [[ "$auto_update_enabled" == "true" ]]; then
+    updater_init "$auto_update_branch" "$auto_update_interval" 2>/dev/null && {
+      updater_set_auto_restart "$auto_update_restart"
+      log_debug "自動更新已啟用，分支: ${auto_update_branch}，間隔: ${auto_update_interval} 分鐘"
     }
   fi
 }
@@ -697,6 +720,115 @@ _cmd_status_report() {
   fi
 }
 
+# update 命令
+cmd_update() {
+  local check_only="${ARG_check:-}"
+  local force="${ARG_force:-}"
+  local no_restart="${ARG_no_restart:-}"
+
+  echo "╔════════════════════════════════════════╗"
+  echo "║         Donna-Ops 更新檢查             ║"
+  echo "╚════════════════════════════════════════╝"
+  echo ""
+
+  # 顯示目前版本
+  echo "【目前版本】"
+  local version_info
+  version_info=$(get_version_info)
+  echo "  版本: $(echo "$version_info" | jq -r '.version')"
+  echo "  Commit: $(echo "$version_info" | jq -r '.commit')"
+  echo "  分支: $(echo "$version_info" | jq -r '.branch')"
+  echo "  日期: $(echo "$version_info" | jq -r '.date')"
+  echo ""
+
+  # 初始化更新器（如果還沒初始化）
+  if [[ "$UPDATER_ENABLED" != "true" ]]; then
+    local branch
+    branch=$(config_get 'auto_update.branch' 'main')
+    if ! updater_init "$branch" 60 2>/dev/null; then
+      echo "錯誤: 無法初始化更新器（可能不在 Git 儲存庫中）"
+      return 1
+    fi
+  fi
+
+  # 檢查更新
+  echo "【檢查更新中...】"
+  local check_result
+  check_result=$(check_for_updates 2>&1)
+
+  local available
+  available=$(echo "$check_result" | jq -r '.available // false' 2>/dev/null)
+
+  if [[ "$available" != "true" ]]; then
+    local error_msg
+    error_msg=$(echo "$check_result" | jq -r '.error // .message // "已是最新版本"' 2>/dev/null)
+    echo "  $error_msg"
+    echo ""
+    return 0
+  fi
+
+  # 顯示更新資訊
+  local behind_count remote_commit latest_message
+  behind_count=$(echo "$check_result" | jq -r '.behind_count')
+  remote_commit=$(echo "$check_result" | jq -r '.remote_commit')
+  latest_message=$(echo "$check_result" | jq -r '.latest_message')
+
+  echo "  發現新版本！"
+  echo "  遠端 Commit: $remote_commit"
+  echo "  落後 $behind_count 個提交"
+  echo "  最新變更: $latest_message"
+  echo ""
+
+  # 如果只是檢查，到此結束
+  if [[ -n "$check_only" ]]; then
+    echo "提示: 執行 'donna-ops.sh update' 來更新"
+    return 0
+  fi
+
+  # 執行更新
+  echo "【執行更新...】"
+
+  local update_args=""
+  [[ -n "$force" ]] && update_args="$update_args --force"
+  [[ -n "$no_restart" ]] && update_args="$update_args --no-restart"
+
+  local update_result
+  # shellcheck disable=SC2086
+  update_result=$(perform_update $update_args 2>&1)
+
+  local success
+  success=$(echo "$update_result" | jq -r '.success // false' 2>/dev/null)
+
+  echo ""
+  if [[ "$success" == "true" ]]; then
+    local updated after_commit restart_status
+    updated=$(echo "$update_result" | jq -r '.updated // false')
+    after_commit=$(echo "$update_result" | jq -r '.after_commit // "unknown"')
+    restart_status=$(echo "$update_result" | jq -r '.restart // "none"')
+
+    if [[ "$updated" == "true" ]]; then
+      echo "✓ 更新成功！"
+      echo "  新版本: $after_commit"
+      case "$restart_status" in
+        systemd) echo "  服務已透過 systemd 重啟" ;;
+        pid)     echo "  服務已重啟" ;;
+        none)    echo "  提示: 請手動重啟服務以套用更新" ;;
+        skipped) echo "  提示: 已跳過重啟（--no-restart）" ;;
+      esac
+    else
+      echo "✓ 已是最新版本"
+    fi
+  else
+    local error
+    error=$(echo "$update_result" | jq -r '.error // "未知錯誤"' 2>/dev/null)
+    local hint
+    hint=$(echo "$update_result" | jq -r '.hint // ""' 2>/dev/null)
+    echo "✗ 更新失敗: $error"
+    [[ -n "$hint" ]] && echo "  提示: $hint"
+    return 1
+  fi
+}
+
 # 主函式
 main() {
   # 解析命令
@@ -704,7 +836,7 @@ main() {
   shift || true
 
   case "$command" in
-    check|daemon|diagnose|status)
+    check|daemon|diagnose|status|update)
       # 載入模組
       load_modules
       load_collectors

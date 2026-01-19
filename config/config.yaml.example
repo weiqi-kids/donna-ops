@@ -79,6 +79,22 @@ status_report:
   # 建議保持 false，僅依據 interval_minutes 回報
   report_every_check: false
 
+# 自動更新設定
+# 當 GitHub 有新版本時自動更新
+auto_update:
+  # 是否啟用自動更新
+  enabled: true
+
+  # 追蹤的分支（通常是 main 或 master）
+  branch: "main"
+
+  # 檢查更新間隔（分鐘）
+  # 建議值：60-240 分鐘
+  interval_minutes: 60
+
+  # 更新後自動重啟服務
+  auto_restart: true
+
 # 日誌設定
 log_level: INFO   # DEBUG, INFO, WARN, ERROR
 
