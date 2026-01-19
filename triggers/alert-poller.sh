@@ -39,6 +39,7 @@ source "${SCRIPT_DIR}/remediation/executor.sh"
 
 # 載入整合
 source "${SCRIPT_DIR}/integrations/github-issues.sh"
+source "${SCRIPT_DIR}/integrations/github-status.sh"
 source "${SCRIPT_DIR}/integrations/linode-alerts.sh"
 
 # 全域設定
@@ -62,7 +63,14 @@ init_alert_poller() {
   fi
 
   # 初始化日誌
-  log_init "${SCRIPT_DIR}/logs" "$(config_get 'log_level' 'INFO')"
+  log_init "${SCRIPT_DIR}/logs" "$(config_get 'logging.level' 'INFO')"
+
+  # 設定日誌輪替
+  local log_rotate_size log_rotate_keep
+  log_rotate_size=$(config_get_int 'logging.rotate.max_size_bytes' 10485760)
+  log_rotate_keep=$(config_get_int 'logging.rotate.keep_backups' 5)
+  log_set_rotate_size "$log_rotate_size"
+  log_set_rotate_keep "$log_rotate_keep"
 
   # 初始化狀態
   state_init "${SCRIPT_DIR}/state"
@@ -102,6 +110,20 @@ init_alert_poller() {
   pipeline_set_normal_threshold "$(config_get_int 'issues.normal_threshold' 3)"
   if [[ "$(config_get_bool 'claude.default_ai' 'false')" == "true" ]]; then
     pipeline_set_use_ai "true"
+  fi
+
+  # 初始化狀態回報
+  local status_report_enabled status_report_interval status_report_on_error
+  status_report_enabled=$(config_get_bool 'status_report.enabled' 'false')
+  status_report_interval=$(config_get_int 'status_report.interval_minutes' 30)
+  status_report_on_error=$(config_get_bool 'status_report.report_on_error' 'true')
+
+  if [[ "$status_report_enabled" == "true" ]]; then
+    status_report_init "$status_report_interval" 2>/dev/null && {
+      pipeline_set_status_report "true"
+      pipeline_set_status_report_on_error "$status_report_on_error"
+      log_debug "狀態回報已啟用"
+    }
   fi
 
   # 讀取輪詢間隔
