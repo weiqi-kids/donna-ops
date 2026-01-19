@@ -199,9 +199,14 @@ log_get_audit_file() {
   echo "$AUDIT_LOG_FILE"
 }
 
+# 日誌輪替設定
+declare -g LOG_ROTATE_MAX_SIZE="${LOG_ROTATE_MAX_SIZE:-10485760}"  # 10MB
+declare -g LOG_ROTATE_KEEP="${LOG_ROTATE_KEEP:-5}"
+
 # 輪替日誌檔（保留最近 N 個備份）
+# 用法: log_rotate [keep_count]
 log_rotate() {
-  local keep="${1:-5}"
+  local keep="${1:-$LOG_ROTATE_KEEP}"
 
   if [[ -z "$LOG_FILE" || ! -f "$LOG_FILE" ]]; then
     return 0
@@ -228,4 +233,96 @@ log_rotate() {
   touch "$LOG_FILE"
 
   log_info "日誌已輪替：${log_name}.${timestamp}"
+}
+
+# 檢查並自動輪替日誌（如果超過大小限制）
+# 用法: log_rotate_if_needed [max_size_bytes]
+log_rotate_if_needed() {
+  local max_size="${1:-$LOG_ROTATE_MAX_SIZE}"
+
+  if [[ -z "$LOG_FILE" || ! -f "$LOG_FILE" ]]; then
+    return 0
+  fi
+
+  local current_size
+  current_size=$(stat -f%z "$LOG_FILE" 2>/dev/null || stat -c%s "$LOG_FILE" 2>/dev/null || echo "0")
+
+  if (( current_size >= max_size )); then
+    log_rotate
+    return 0
+  fi
+
+  return 1
+}
+
+# 設定日誌輪替大小限制
+# 用法: log_set_rotate_size size_in_bytes
+log_set_rotate_size() {
+  LOG_ROTATE_MAX_SIZE="$1"
+}
+
+# 設定保留的日誌備份數量
+# 用法: log_set_rotate_keep count
+log_set_rotate_keep() {
+  LOG_ROTATE_KEEP="$1"
+}
+
+# 清理過期的日誌檔案
+# 用法: log_cleanup [days_to_keep]
+log_cleanup() {
+  local days="${1:-30}"
+
+  if [[ -z "$LOG_FILE" ]]; then
+    return 0
+  fi
+
+  local log_dir
+  log_dir=$(dirname "$LOG_FILE")
+
+  # 刪除超過指定天數的日誌
+  find "$log_dir" -name "*.log.*" -type f -mtime +"$days" -delete 2>/dev/null || true
+
+  # 記錄清理動作
+  log_debug "已清理 $days 天前的日誌檔案"
+}
+
+# 取得日誌統計
+# 用法: log_stats
+log_stats() {
+  if [[ -z "$LOG_FILE" ]]; then
+    echo '{"error": "Log file not initialized"}'
+    return 1
+  fi
+
+  local log_dir
+  log_dir=$(dirname "$LOG_FILE")
+
+  local main_size=0
+  local backup_count=0
+  local total_size=0
+
+  if [[ -f "$LOG_FILE" ]]; then
+    main_size=$(stat -f%z "$LOG_FILE" 2>/dev/null || stat -c%s "$LOG_FILE" 2>/dev/null || echo "0")
+  fi
+
+  while IFS= read -r f; do
+    [[ -f "$f" ]] || continue
+    local fsize
+    fsize=$(stat -f%z "$f" 2>/dev/null || stat -c%s "$f" 2>/dev/null || echo "0")
+    ((total_size += fsize))
+    ((backup_count++))
+  done < <(ls "${LOG_FILE}."* 2>/dev/null)
+
+  ((total_size += main_size))
+
+  cat <<EOF
+{
+  "log_file": "$LOG_FILE",
+  "main_size_bytes": $main_size,
+  "backup_count": $backup_count,
+  "total_size_bytes": $total_size,
+  "max_size_bytes": $LOG_ROTATE_MAX_SIZE,
+  "keep_backups": $LOG_ROTATE_KEEP
+}
+EOF
 }

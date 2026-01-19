@@ -96,7 +96,32 @@ auto_update:
   auto_restart: true
 
 # 日誌設定
-log_level: INFO   # DEBUG, INFO, WARN, ERROR
+logging:
+  # 日誌等級: DEBUG, INFO, WARN, ERROR
+  level: INFO
+
+  # 日誌輪替設定
+  rotate:
+    # 單一日誌檔案大小上限（bytes）
+    # 預設 10MB = 10485760
+    max_size_bytes: 10485760
+
+    # 保留的備份數量
+    keep_backups: 5
+
+    # 清理超過 N 天的舊日誌
+    cleanup_days: 30
+
+# 重試機制設定
+retry:
+  # 最大重試次數
+  max_attempts: 4
+
+  # 初始延遲（秒）
+  initial_delay: 2
+
+  # 最大延遲（秒）
+  max_delay: 30
 
 # Claude AI 設定
 claude:

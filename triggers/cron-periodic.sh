@@ -205,6 +205,9 @@ run_periodic_check() {
   # 清理過期冷卻
   state_cleanup_cooldowns
 
+  # 日誌輪替檢查
+  log_rotate_if_needed
+
   # 檢查自動更新
   if [[ "$UPDATER_ENABLED" == "true" ]]; then
     if should_check_update; then

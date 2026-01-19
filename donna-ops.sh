@@ -45,6 +45,7 @@ Donna-Ops v${VERSION} - 自動化維運框架
   diagnose    執行完整診斷
   status      顯示目前狀態
   update      檢查並更新到最新版本
+  validate    驗證配置和環境
   version     顯示版本
 
 check 選項:
@@ -91,6 +92,9 @@ load_modules() {
   source "${SCRIPT_DIR}/lib/state.sh"
   source "${SCRIPT_DIR}/lib/notify.sh"
   source "${SCRIPT_DIR}/lib/updater.sh"
+  source "${SCRIPT_DIR}/lib/retry.sh"
+  source "${SCRIPT_DIR}/lib/signals.sh"
+  source "${SCRIPT_DIR}/lib/validator.sh"
 }
 
 # 載入收集器
@@ -850,8 +854,29 @@ main() {
       # 初始化
       initialize
 
+      # 初始化信號處理（daemon 模式）
+      if [[ "$command" == "daemon" ]]; then
+        signals_init 30
+      fi
+
       # 執行命令
       "cmd_${command}"
+      ;;
+    validate)
+      # validate 命令只需要基本模組
+      source "${SCRIPT_DIR}/lib/core.sh"
+      source "${SCRIPT_DIR}/lib/args.sh"
+      source "${SCRIPT_DIR}/lib/config.sh"
+      source "${SCRIPT_DIR}/lib/validator.sh"
+
+      # 載入設定
+      local config_file="${SCRIPT_DIR}/config/config.yaml"
+      if [[ -f "$config_file" ]]; then
+        config_load "$config_file" 2>/dev/null || true
+      fi
+
+      # 執行驗證
+      validate_all "$config_file"
       ;;
     version|-v|--version)
       echo "Donna-Ops v${VERSION}"
