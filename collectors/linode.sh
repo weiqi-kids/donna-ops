@@ -31,7 +31,7 @@ linode_init() {
   return 0
 }
 
-# 內部函式：呼叫 Linode API
+# 內部函式：呼叫 Linode API（支援重試）
 _linode_api() {
   local method="${1:-GET}"
   local endpoint="$2"
@@ -45,16 +45,32 @@ _linode_api() {
   local url="${LINODE_API_BASE}${endpoint}"
   local response
 
-  if [[ "$method" == "GET" ]]; then
-    response=$(curl -s -H "Authorization: Bearer $LINODE_API_TOKEN" \
-      -H "Content-Type: application/json" \
-      "$url" 2>&1)
+  # 使用重試機制（如果可用）
+  if declare -f retry_curl >/dev/null 2>&1; then
+    if [[ "$method" == "GET" ]]; then
+      response=$(retry_curl -s -H "Authorization: Bearer $LINODE_API_TOKEN" \
+        -H "Content-Type: application/json" \
+        "$url" 2>&1)
+    else
+      response=$(retry_curl -s -X "$method" \
+        -H "Authorization: Bearer $LINODE_API_TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "$data" \
+        "$url" 2>&1)
+    fi
   else
-    response=$(curl -s -X "$method" \
-      -H "Authorization: Bearer $LINODE_API_TOKEN" \
-      -H "Content-Type: application/json" \
-      -d "$data" \
-      "$url" 2>&1)
+    # 沒有重試模組，直接呼叫 curl
+    if [[ "$method" == "GET" ]]; then
+      response=$(curl -s -H "Authorization: Bearer $LINODE_API_TOKEN" \
+        -H "Content-Type: application/json" \
+        "$url" 2>&1)
+    else
+      response=$(curl -s -X "$method" \
+        -H "Authorization: Bearer $LINODE_API_TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "$data" \
+        "$url" 2>&1)
+    fi
   fi
 
   echo "$response"
