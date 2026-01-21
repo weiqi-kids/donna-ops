@@ -22,7 +22,6 @@ INTEGRATION_GITHUB_STATUS_SH_LOADED=1
 
 # 狀態回報設定
 declare -g STATUS_ISSUE_NUMBER=""
-declare -g STATUS_REPORT_ENABLED="false"
 declare -g STATUS_REPORT_INTERVAL=30  # 分鐘
 
 # 狀態標籤
@@ -37,22 +36,21 @@ status_report_init() {
   STATUS_REPORT_INTERVAL="$interval"
 
   if [[ -z "$GITHUB_REPO" ]]; then
-    echo "WARN: GITHUB_REPO 未設定，狀態回報停用" >&2
+    echo "WARN: GITHUB_REPO 未設定，狀態回報將無法運作" >&2
     return 1
   fi
 
   # 檢查 gh CLI
   if ! command -v gh >/dev/null 2>&1; then
-    echo "WARN: gh CLI 未安裝，狀態回報停用" >&2
+    echo "WARN: gh CLI 未安裝，狀態回報將無法運作" >&2
     return 1
   fi
 
   if ! gh auth status >/dev/null 2>&1; then
-    echo "WARN: gh CLI 未認證，狀態回報停用" >&2
+    echo "WARN: gh CLI 未認證，狀態回報將無法運作" >&2
     return 1
   fi
 
-  STATUS_REPORT_ENABLED="true"
   return 0
 }
 
@@ -271,8 +269,8 @@ report_status_to_github() {
   local alert_summary="${2:-{}}"
   local analysis="${3:-{}}"
 
-  if [[ "$STATUS_REPORT_ENABLED" != "true" ]]; then
-    echo '{"success": false, "error": "Status report not enabled"}'
+  if [[ -z "$GITHUB_REPO" ]]; then
+    echo '{"success": false, "error": "GITHUB_REPO not configured"}'
     return 1
   fi
 
@@ -329,10 +327,6 @@ EOF
 # 用法: should_report_status
 # 返回: 0=應該回報, 1=不需要
 should_report_status() {
-  if [[ "$STATUS_REPORT_ENABLED" != "true" ]]; then
-    return 1
-  fi
-
   local state_dir="${SCRIPT_DIR:-/opt/donna-ops}/state"
   local last_report_file="${state_dir}/last_status_report"
 
@@ -405,7 +399,7 @@ report_alert_to_github() {
   local alert_summary="${1:-{}}"
   local analysis="${2:-{}}"
 
-  if [[ "$STATUS_REPORT_ENABLED" != "true" ]]; then
+  if [[ -z "$GITHUB_REPO" ]]; then
     return 1
   fi
 

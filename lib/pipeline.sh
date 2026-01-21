@@ -21,10 +21,6 @@ declare -g PIPELINE_DRY_RUN="${PIPELINE_DRY_RUN:-false}"
 declare -g PIPELINE_USE_AI="${PIPELINE_USE_AI:-false}"
 declare -g PIPELINE_NORMAL_THRESHOLD="${PIPELINE_NORMAL_THRESHOLD:-3}"
 
-# 狀態回報設定
-declare -g PIPELINE_STATUS_REPORT="${PIPELINE_STATUS_REPORT:-false}"
-declare -g PIPELINE_STATUS_REPORT_ON_ERROR="${PIPELINE_STATUS_REPORT_ON_ERROR:-true}"
-
 # 主處理流程
 # 用法：pipeline_process "alert_summary_json" "system_metrics_json"
 # alert_summary 格式：
@@ -47,20 +43,19 @@ pipeline_process() {
 
   log_info "[Pipeline] 來源: $source, 問題數: $issue_count, 嚴重度: $max_severity"
 
+  local analysis="{}"
+
   if (( issue_count > 0 )); then
     # 有問題，執行完整處理流程
     _pipeline_handle_issues "$alert_summary" "$system_metrics" "$source"
   else
     # 沒有問題，檢查是否有可以關閉的 Issue
     _pipeline_check_resolved
-
-    # 定期回報狀態（即使正常也回報）
-    if [[ "$PIPELINE_STATUS_REPORT" == "true" ]]; then
-      local analysis
-      analysis=$(quick_analysis "$alert_summary" 2>/dev/null || echo '{}')
-      _pipeline_report_status "$system_metrics" "$alert_summary" "$analysis" "periodic"
-    fi
+    analysis=$(quick_analysis "$alert_summary" 2>/dev/null || echo '{}')
   fi
+
+  # 一律回報狀態（不論有無問題）
+  _pipeline_report_status "$system_metrics" "$alert_summary" "$analysis" "periodic"
 }
 
 # 處理問題
@@ -88,12 +83,6 @@ _pipeline_handle_issues() {
   # Step 4: 發送通知
   log_info "[Pipeline] Step 4: 發送通知..."
   _pipeline_notify "$alert_summary" "$analysis" "$source"
-
-  # Step 5: 回報狀態到 GitHub（如果啟用且有問題）
-  if [[ "$PIPELINE_STATUS_REPORT_ON_ERROR" == "true" ]]; then
-    log_info "[Pipeline] Step 5: 回報狀態到 GitHub..."
-    _pipeline_report_status "$system_metrics" "$alert_summary" "$analysis" "error"
-  fi
 
   log_info "[Pipeline] 處理完成"
 }
@@ -426,24 +415,6 @@ pipeline_set_normal_threshold() {
   PIPELINE_NORMAL_THRESHOLD="$1"
 }
 
-# 設定狀態回報
-pipeline_set_status_report() {
-  local enabled="$1"
-  case "${enabled,,}" in
-    true|yes|1|on)  PIPELINE_STATUS_REPORT="true" ;;
-    false|no|0|off) PIPELINE_STATUS_REPORT="false" ;;
-  esac
-}
-
-# 設定錯誤時回報
-pipeline_set_status_report_on_error() {
-  local enabled="$1"
-  case "${enabled,,}" in
-    true|yes|1|on)  PIPELINE_STATUS_REPORT_ON_ERROR="true" ;;
-    false|no|0|off) PIPELINE_STATUS_REPORT_ON_ERROR="false" ;;
-  esac
-}
-
 # 內部函式：回報狀態到 GitHub
 # 用法: _pipeline_report_status "system_metrics" "alert_summary" "analysis" "trigger"
 # trigger: "periodic" 定期回報, "error" 有問題時回報
@@ -459,25 +430,14 @@ _pipeline_report_status() {
     return 0
   fi
 
-  # 檢查是否已啟用
-  if [[ "${STATUS_REPORT_ENABLED:-false}" != "true" ]]; then
-    log_debug "[Pipeline] 狀態回報未啟用"
-    return 0
-  fi
-
   if [[ "$PIPELINE_DRY_RUN" == "true" ]]; then
     log_info "[DRY-RUN] 會回報狀態到 GitHub"
     return 0
   fi
 
+  # 一律回報狀態（檢查間隔由 github-status.sh 控制）
   local result
-  if [[ "$trigger" == "error" ]]; then
-    # 有問題時立即回報
-    result=$(force_report_status "$system_metrics" "$alert_summary" "$analysis" 2>&1)
-  else
-    # 定期回報（檢查間隔）
-    result=$(conditional_report_status "$system_metrics" "$alert_summary" "$analysis" 2>&1)
-  fi
+  result=$(conditional_report_status "$system_metrics" "$alert_summary" "$analysis" 2>&1)
 
   local success
   success=$(echo "$result" | jq -r '.success // .skipped // false' 2>/dev/null)

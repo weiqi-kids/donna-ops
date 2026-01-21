@@ -113,19 +113,12 @@ init_alert_poller() {
     pipeline_set_use_ai "true"
   fi
 
-  # 初始化狀態回報
-  local status_report_enabled status_report_interval status_report_on_error
-  status_report_enabled=$(config_get_bool 'status_report.enabled' 'false')
+  # 初始化狀態回報（一律啟用）
+  local status_report_interval
   status_report_interval=$(config_get_int 'status_report.interval_minutes' 30)
-  status_report_on_error=$(config_get_bool 'status_report.report_on_error' 'true')
-
-  if [[ "$status_report_enabled" == "true" ]]; then
-    status_report_init "$status_report_interval" 2>/dev/null && {
-      pipeline_set_status_report "true"
-      pipeline_set_status_report_on_error "$status_report_on_error"
-      log_debug "狀態回報已啟用"
-    }
-  fi
+  status_report_init "$status_report_interval" 2>/dev/null && {
+    log_debug "狀態回報已啟用，間隔: ${status_report_interval} 分鐘"
+  }
 
   # 讀取輪詢間隔
   POLL_INTERVAL=$(config_get_int 'intervals.alert_poll_seconds' 60)
